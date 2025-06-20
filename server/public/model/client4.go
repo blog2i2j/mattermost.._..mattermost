@@ -574,6 +574,10 @@ func (c *Client4) exportRoute(name string) string {
 	return fmt.Sprintf(c.exportsRoute()+"/%v", name)
 }
 
+func (c *Client4) importRoute(name string) string {
+	return fmt.Sprintf(c.importsRoute()+"/%v", name)
+}
+
 func (c *Client4) remoteClusterRoute() string {
 	return "/remotecluster"
 }
@@ -627,7 +631,7 @@ func (c *Client4) accessControlPoliciesRoute() string {
 }
 
 func (c *Client4) celRoute() string {
-	return fmt.Sprintf(c.accessControlPoliciesRoute() + "/cel")
+	return c.accessControlPoliciesRoute() + "/cel"
 }
 
 func (c *Client4) accessControlPolicyRoute(policyID string) string {
@@ -1392,8 +1396,23 @@ func (c *Client4) GetUsersInChannelByStatus(ctx context.Context, channelId strin
 
 // GetUsersNotInChannel returns a page of users not in a channel. Page counting starts at 0.
 func (c *Client4) GetUsersNotInChannel(ctx context.Context, teamId, channelId string, page int, perPage int, etag string) ([]*User, *Response, error) {
-	query := fmt.Sprintf("?in_team=%v&not_in_channel=%v&page=%v&per_page=%v", teamId, channelId, page, perPage)
-	r, err := c.DoAPIGet(ctx, c.usersRoute()+query, etag)
+	options := &GetUsersNotInChannelOptions{
+		TeamID:   teamId,
+		Page:     page,
+		Limit:    perPage,
+		Etag:     etag,
+		CursorID: "",
+	}
+	return c.GetUsersNotInChannelWithOptions(ctx, channelId, options)
+}
+
+// GetUsersNotInChannelWithOptionsStruct returns a page of users not in a channel using the options struct.
+func (c *Client4) GetUsersNotInChannelWithOptions(ctx context.Context, channelId string, options *GetUsersNotInChannelOptions) ([]*User, *Response, error) {
+	query := fmt.Sprintf("?in_team=%v&not_in_channel=%v&page=%v&per_page=%v", options.TeamID, channelId, options.Page, options.Limit)
+	if options.CursorID != "" {
+		query += fmt.Sprintf("&cursor_id=%v", options.CursorID)
+	}
+	r, err := c.DoAPIGet(ctx, c.usersRoute()+query, options.Etag)
 	if err != nil {
 		return nil, BuildResponse(r), err
 	}
@@ -1403,7 +1422,7 @@ func (c *Client4) GetUsersNotInChannel(ctx context.Context, teamId, channelId st
 		return list, BuildResponse(r), nil
 	}
 	if err := json.NewDecoder(r.Body).Decode(&list); err != nil {
-		return nil, nil, NewAppError("GetUsersNotInChannel", "api.unmarshal_error", nil, "", http.StatusInternalServerError).Wrap(err)
+		return nil, nil, NewAppError("GetUsersNotInChannelWithOptionsStruct", "api.unmarshal_error", nil, "", http.StatusInternalServerError).Wrap(err)
 	}
 	return list, BuildResponse(r), nil
 }
@@ -2934,7 +2953,6 @@ func (c *Client4) InviteGuestsToTeam(ctx context.Context, teamId string, userEma
 // InviteUsersToTeam invite users by email to the team.
 func (c *Client4) InviteUsersToTeamGracefully(ctx context.Context, teamId string, userEmails []string) ([]*EmailInviteWithError, *Response, error) {
 	r, err := c.DoAPIPost(ctx, c.teamRoute(teamId)+"/invite/email?graceful="+c.boolString(true), ArrayToJSON(userEmails))
-
 	if err != nil {
 		return nil, BuildResponse(r), err
 	}
@@ -8798,6 +8816,15 @@ func (c *Client4) ListImports(ctx context.Context) ([]string, *Response, error) 
 	return c.ArrayFromJSON(r.Body), BuildResponse(r), nil
 }
 
+func (c *Client4) DeleteImport(ctx context.Context, name string) (*Response, error) {
+	r, err := c.DoAPIDelete(ctx, c.importRoute(name))
+	if err != nil {
+		return BuildResponse(r), err
+	}
+	defer closeBody(r)
+	return BuildResponse(r), nil
+}
+
 func (c *Client4) ListExports(ctx context.Context) ([]string, *Response, error) {
 	r, err := c.DoAPIGet(ctx, c.exportsRoute(), "")
 	if err != nil {
@@ -9341,7 +9368,6 @@ func (c *Client4) AddUserToGroupSyncables(ctx context.Context, userID string) (*
 
 func (c *Client4) CheckCWSConnection(ctx context.Context, userId string) (*Response, error) {
 	r, err := c.DoAPIGet(ctx, c.cloudRoute()+"/healthz", "")
-
 	if err != nil {
 		return BuildResponse(r), err
 	}
